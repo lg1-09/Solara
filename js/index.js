@@ -74,8 +74,10 @@ const dom = {
     addAllFavoritesBtn: document.getElementById("addAllFavoritesBtn"),
     importFavoritesBtn: document.getElementById("importFavoritesBtn"),
     exportFavoritesBtn: document.getElementById("exportFavoritesBtn"),
+    downloadFavoritesBtn: document.getElementById("downloadFavoritesBtn"),
     importFavoritesInput: document.getElementById("importFavoritesInput"),
     clearFavoritesBtn: document.getElementById("clearFavoritesBtn"),
+    mobileDownloadFavoritesBtn: document.getElementById("mobileDownloadFavoritesBtn"),
     currentFavoriteToggle: document.getElementById("currentFavoriteToggle"),
 };
 
@@ -3194,6 +3196,10 @@ function setupInteractions() {
         dom.exportFavoritesBtn.addEventListener("click", exportFavorites);
     }
 
+    if (dom.downloadFavoritesBtn) {
+        dom.downloadFavoritesBtn.addEventListener("click", (e) => showBulkQualityMenu(e));
+    }
+
     if (dom.clearFavoritesBtn) {
         dom.clearFavoritesBtn.addEventListener("click", clearFavorites);
     }
@@ -3207,6 +3213,10 @@ function setupInteractions() {
             dom.importFavoritesInput.value = "";
             dom.importFavoritesInput.click();
         });
+    }
+
+    if (dom.mobileDownloadFavoritesBtn) {
+        dom.mobileDownloadFavoritesBtn.addEventListener("click", (e) => showBulkQualityMenu(e));
     }
 
     if (dom.mobileExportFavoritesBtn) {
@@ -4139,6 +4149,114 @@ async function downloadWithQuality(event, index, type, quality) {
     } catch (error) {
         console.error("下载失败:", error);
         showNotification("下载失败，请稍后重试", "error");
+    }
+}
+
+// 显示批量下载的质量选择菜单（收藏列表）
+function showBulkQualityMenu(event) {
+    event.stopPropagation();
+
+    const existingMenu = document.querySelector(".dynamic-quality-menu");
+    if (existingMenu) existingMenu.remove();
+
+    const menu = document.createElement("div");
+    menu.className = "dynamic-quality-menu";
+    menu.innerHTML = `
+        <div class="quality-option" onclick="downloadFavoritesBulkWithQuality(event, '128')">标准音质 (128k)</div>
+        <div class="quality-option" onclick="downloadFavoritesBulkWithQuality(event, '192')">高音质 (192k)</div>
+        <div class="quality-option" onclick="downloadFavoritesBulkWithQuality(event, '320')">超高音质 (320k)</div>
+        <div class="quality-option" onclick="downloadFavoritesBulkWithQuality(event, '999')">无损音质</div>
+    `;
+
+    const button = event.target.closest("button") || event.target;
+    const rect = button.getBoundingClientRect();
+    menu.style.position = "fixed";
+    menu.style.top = (rect.bottom + 5) + "px";
+    menu.style.left = (rect.left - 50) + "px";
+    menu.style.zIndex = "10000";
+    document.body.appendChild(menu);
+
+    setTimeout(() => {
+        document.addEventListener("click", function closeMenu(e) {
+            if (!menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener("click", closeMenu);
+            }
+        });
+    }, 0);
+}
+
+// 批量下载收藏列表（质量选定后的入口）
+async function downloadFavoritesBulkWithQuality(event, quality) {
+    event.stopPropagation();
+    const dynamicMenu = document.querySelector(".dynamic-quality-menu");
+    if (dynamicMenu) dynamicMenu.remove();
+    try {
+        await downloadFavoritesBulk(quality);
+    } catch (err) {
+        console.error("批量下载失败:", err);
+        showNotification("批量下载失败，请稍后重试", "error");
+    }
+}
+
+// 批量下载收藏列表实现：优先使用 File System Access API，否则回退到逐个下载
+async function downloadFavoritesBulk(quality = '320') {
+    const favorites = ensureFavoriteSongsArray();
+    if (!Array.isArray(favorites) || favorites.length === 0) {
+        showNotification("收藏列表为空，无法下载", "warning");
+        return;
+    }
+
+    // 浏览器支持目录选择并允许写入（Chromium 系列）
+    if (typeof window.showDirectoryPicker === 'function') {
+        try {
+            const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+            showNotification('开始下载到所选文件夹...');
+            for (let i = 0; i < favorites.length; i++) {
+                const song = favorites[i];
+                try {
+                    const audioUrl = API.getSongUrl(song, quality);
+                    const audioData = await API.fetchJson(audioUrl);
+                    if (!audioData || !audioData.url) {
+                        console.warn('未获得下载地址，跳过:', song);
+                        continue;
+                    }
+                    const downloadUrl = buildAudioProxyUrl(audioData.url) || preferHttpsUrl(audioData.url) || audioData.url;
+                    const resp = await fetch(downloadUrl);
+                    if (!resp.ok) {
+                        console.warn('下载文件失败，跳过:', downloadUrl);
+                        continue;
+                    }
+                    const blob = await resp.blob();
+                    const mimeParts = (blob.type || '').split('/');
+                    const ext = mimeParts[1] ? mimeParts[1].split('+')[0] : (quality === '999' ? 'flac' : 'mp3');
+                    const fileName = `${song.name} - ${Array.isArray(song.artist) ? song.artist.join(', ') : song.artist}.${ext}`;
+                    const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(blob);
+                    await writable.close();
+                } catch (err) {
+                    console.error('单首保存失败，继续下一个：', err);
+                }
+            }
+            showNotification(`已保存 ${favorites.length} 首收藏至选择文件夹`, 'success');
+        } catch (err) {
+            console.warn('目录选择或写入被取消或不被允许:', err);
+            showNotification('未选择目录或无写入权限，已回退为浏览器默认下载', 'warning');
+            // 回退到逐个下载
+            for (const song of favorites) {
+                await downloadSong(song, quality);
+            }
+        }
+    } else {
+        // 浏览器不支持目录选择，使用逐个下载（通过创建 <a>）
+        showNotification('浏览器不支持选择保存路径，开始逐个下载...', 'info');
+        for (const song of favorites) {
+            // 小延迟以避免触发浏览器限制
+            await downloadSong(song, quality);
+            await new Promise(r => setTimeout(r, 300));
+        }
+        showNotification('批量下载任务已触发（请查看浏览器下载列表）', 'success');
     }
 }
 
