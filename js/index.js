@@ -4212,6 +4212,22 @@ if (typeof normalizeFileExtension !== 'function') {
     }
 }
 
+// 文件名清理，移除非法文件名字符
+function sanitizeFileName(name) {
+    if (!name) return "file";
+    return String(name).replace(/[\\/:*?"<>|\n\r\t]+/g, "_").trim();
+}
+
+function normalizeImageExtension(ext, preferred) {
+    if (!ext) return preferred || 'jpg';
+    ext = String(ext).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (ext === 'jpeg') return 'jpg';
+    if (ext === 'png') return 'png';
+    if (ext === 'webp') return 'webp';
+    if (ext === 'gif') return 'gif';
+    return preferred || 'jpg';
+}
+
 // 批量下载收藏列表实现：优先使用 File System Access API，否则回退到逐个下载
 async function downloadFavoritesBulk(quality = '320') {
     const favorites = ensureFavoriteSongsArray();
@@ -4268,6 +4284,53 @@ async function downloadFavoritesBulk(quality = '320') {
                     const writable = await fileHandle.createWritable();
                     await writable.write(blob);
                     await writable.close();
+                    // 保存封面（若可用）
+                    try {
+                        if (song.pic_id) {
+                            const picApiUrl = API.getPicUrl(song);
+                            const picJson = await API.fetchJson(picApiUrl);
+                            if (picJson && picJson.url) {
+                                const imgResp = await fetch(preferHttpsUrl(picJson.url));
+                                if (imgResp && imgResp.ok) {
+                                    const imgBlob = await imgResp.blob();
+                                    let imgExt = 'jpg';
+                                    if (imgBlob.type) {
+                                        const p = (imgBlob.type.split('/')[1] || '').split('+')[0];
+                                        imgExt = normalizeImageExtension(p, 'jpg');
+                                    } else {
+                                        try {
+                                            const urlObj = new URL(picJson.url);
+                                            const m = (urlObj.pathname || '').match(/\.([a-z0-9]+)$/i);
+                                            if (m && m[1]) imgExt = normalizeImageExtension(m[1], 'jpg');
+                                        } catch (e) {}
+                                    }
+                                    const coverName = `${sanitizeFileName(song.name)} - ${sanitizeFileName(Array.isArray(song.artist) ? song.artist.join(', ') : song.artist)} - cover.${imgExt}`;
+                                    const coverHandle = await dirHandle.getFileHandle(coverName, { create: true });
+                                    const coverWritable = await coverHandle.createWritable();
+                                    await coverWritable.write(imgBlob);
+                                    await coverWritable.close();
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('保存封面失败:', err);
+                    }
+
+                    // 保存歌词（若可用）
+                    try {
+                        const lyricApiUrl = API.getLyric(song);
+                        const lyricJson = await API.fetchJson(lyricApiUrl);
+                        const lyricText = lyricJson && (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric) ? (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric) : null;
+                        if (lyricText) {
+                            const lyricName = `${sanitizeFileName(song.name)} - ${sanitizeFileName(Array.isArray(song.artist) ? song.artist.join(', ') : song.artist)}.lrc`;
+                            const lyricHandle = await dirHandle.getFileHandle(lyricName, { create: true });
+                            const lyricWritable = await lyricHandle.createWritable();
+                            await lyricWritable.write(lyricText);
+                            await lyricWritable.close();
+                        }
+                    } catch (err) {
+                        console.warn('保存歌词失败:', err);
+                    }
                 } catch (err) {
                     console.error('单首保存失败，继续下一个：', err);
                 }
@@ -4285,8 +4348,69 @@ async function downloadFavoritesBulk(quality = '320') {
         // 浏览器不支持目录选择，使用逐个下载（通过创建 <a>）
         showNotification('浏览器不支持选择保存路径，开始逐个下载...', 'info');
         for (const song of favorites) {
+            try {
+                // 下载音频（会触发浏览器下载）
+                await downloadSong(song, quality);
+
+                // 下载封面（如果可用）
+                try {
+                    if (song.pic_id) {
+                        const picJson = await API.fetchJson(API.getPicUrl(song));
+                        if (picJson && picJson.url) {
+                            const imgResp = await fetch(preferHttpsUrl(picJson.url));
+                            if (imgResp && imgResp.ok) {
+                                const imgBlob = await imgResp.blob();
+                                let imgExt = 'jpg';
+                                if (imgBlob.type) {
+                                    const p = (imgBlob.type.split('/')[1] || '').split('+')[0];
+                                    imgExt = normalizeImageExtension(p, 'jpg');
+                                } else {
+                                    try {
+                                        const urlObj = new URL(picJson.url);
+                                        const m = (urlObj.pathname || '').match(/\.([a-z0-9]+)$/i);
+                                        if (m && m[1]) imgExt = normalizeImageExtension(m[1], 'jpg');
+                                    } catch (e) {}
+                                }
+                                const coverName = `${sanitizeFileName(song.name)} - ${sanitizeFileName(Array.isArray(song.artist) ? song.artist.join(', ') : song.artist)} - cover.${imgExt}`;
+                                const coverUrl = URL.createObjectURL(imgBlob);
+                                const a = document.createElement('a');
+                                a.href = coverUrl;
+                                a.download = coverName;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                URL.revokeObjectURL(coverUrl);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.warn('回退下载封面失败:', err);
+                }
+
+                // 下载歌词（如果可用）
+                try {
+                    const lyricJson = await API.fetchJson(API.getLyric(song));
+                    const lyricText = lyricJson && (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric) ? (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric) : null;
+                    if (lyricText) {
+                        const lyricName = `${sanitizeFileName(song.name)} - ${sanitizeFileName(Array.isArray(song.artist) ? song.artist.join(', ') : song.artist)}.lrc`;
+                        const blob = new Blob([lyricText], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a2 = document.createElement('a');
+                        a2.href = url;
+                        a2.download = lyricName;
+                        document.body.appendChild(a2);
+                        a2.click();
+                        document.body.removeChild(a2);
+                        URL.revokeObjectURL(url);
+                    }
+                } catch (err) {
+                    console.warn('回退下载歌词失败:', err);
+                }
+
+            } catch (err) {
+                console.warn('回退下载单首失败，继续下一个:', err);
+            }
             // 小延迟以避免触发浏览器限制
-            await downloadSong(song, quality);
             await new Promise(r => setTimeout(r, 300));
         }
         showNotification('批量下载任务已触发（请查看浏览器下载列表）', 'success');
