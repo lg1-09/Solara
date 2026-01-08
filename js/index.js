@@ -4199,6 +4199,19 @@ async function downloadFavoritesBulkWithQuality(event, quality) {
     }
 }
 
+// 若尚未定义，提供扩展名标准化函数（用于将 mpeg -> mp3 等）
+if (typeof normalizeFileExtension !== 'function') {
+    function normalizeFileExtension(ext, preferredExtension) {
+        if (!ext) return preferredExtension || 'mp3';
+        ext = String(ext).toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (ext === "mpeg" || ext === "mpga") return "mp3";
+        if (ext === "mp3") return "mp3";
+        if (ext === "m4a" || ext === "mp4") return "m4a";
+        if (ext === "flac" || ext === "wav" || ext === "ape") return ext;
+        return preferredExtension || 'mp3';
+    }
+}
+
 // 批量下载收藏列表实现：优先使用 File System Access API，否则回退到逐个下载
 async function downloadFavoritesBulk(quality = '320') {
     const favorites = ensureFavoriteSongsArray();
@@ -4228,8 +4241,28 @@ async function downloadFavoritesBulk(quality = '320') {
                         continue;
                     }
                     const blob = await resp.blob();
-                    const mimeParts = (blob.type || '').split('/');
-                    const ext = mimeParts[1] ? mimeParts[1].split('+')[0] : (quality === '999' ? 'flac' : 'mp3');
+                    const preferredExtension = quality === '999' ? 'flac' : quality === '740' ? 'ape' : 'mp3';
+                    // 先尝试用 blob.type 推断，其次尝试 audioData.mime，最后尝试 URL 后缀，回退到 preferredExtension
+                    let ext = preferredExtension;
+                    const blobType = blob.type || '';
+                    if (blobType) {
+                        const p = blobType.split('/')[1] || '';
+                        if (p) ext = normalizeFileExtension(p.split('+')[0], preferredExtension);
+                    }
+                    if (!ext && audioData && (audioData.mime || audioData.type)) {
+                        const m = (audioData.mime || audioData.type).split('/')[1] || '';
+                        if (m) ext = normalizeFileExtension(m.split('+')[0], preferredExtension);
+                    }
+                    if (!ext) {
+                        try {
+                            const urlObj = new URL(audioData.url);
+                            const match = (urlObj.pathname || '').match(/\.([a-z0-9]+)$/i);
+                            if (match && match[1]) ext = normalizeFileExtension(match[1], preferredExtension);
+                        } catch (e) {
+                            // ignore
+                        }
+                    }
+                    if (!ext) ext = preferredExtension;
                     const fileName = `${song.name} - ${Array.isArray(song.artist) ? song.artist.join(', ') : song.artist}.${ext}`;
                     const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
                     const writable = await fileHandle.createWritable();
@@ -5999,6 +6032,17 @@ function scrollToCurrentLyric(element, containerOverride) {
 
 }
 
+// normalize file extension helper
+function normalizeFileExtension(ext, preferredExtension) {
+    if (!ext) return preferredExtension;
+    ext = String(ext).toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (ext === "mpeg" || ext === "mpga") return "mp3";
+    if (ext === "mp3") return "mp3";
+    if (ext === "m4a" || ext === "mp4") return "m4a";
+    if (ext === "flac" || ext === "wav" || ext === "ape") return ext;
+    return preferredExtension || "mp3";
+}
+
 // 修复：下载歌曲
 async function downloadSong(song, quality = "320") {
     try {
@@ -6021,22 +6065,26 @@ async function downloadSong(song, quality = "320") {
 
             const link = document.createElement("a");
             link.href = downloadUrl;
-            const preferredExtension =
-                quality === "999" ? "flac" : quality === "740" ? "ape" : "mp3";
-            const fileExtension = (() => {
-                try {
-                    const url = new URL(audioData.url);
-                    const pathname = url.pathname || "";
-                    const match = pathname.match(/\.([a-z0-9]+)$/i);
-                    if (match) {
-                        return match[1];
+            const preferredExtension = quality === "999" ? "flac" : quality === "740" ? "ape" : "mp3";
+            // 尝试从 URL 后缀解析扩展名，若无则从 mime/type 字段解析，最后回退到 preferredExtension
+            let fileExt = preferredExtension;
+            try {
+                const urlObj = new URL(audioData.url);
+                const pathMatch = (urlObj.pathname || "").match(/\.([a-z0-9]+)$/i);
+                if (pathMatch && pathMatch[1]) {
+                    fileExt = normalizeFileExtension(pathMatch[1], preferredExtension);
+                } else {
+                    const mime = audioData.mime || audioData.type || "";
+                    if (mime) {
+                        const mimePart = String(mime).split("/")[1] || "";
+                        fileExt = normalizeFileExtension(mimePart.replace(/\+.*$/, ""), preferredExtension);
                     }
-                } catch (error) {
-                    console.warn("无法从下载链接中解析扩展名:", error);
                 }
-                return preferredExtension;
-            })();
-            link.download = `${song.name} - ${Array.isArray(song.artist) ? song.artist.join(", ") : song.artist}.${fileExtension}`;
+            } catch (err) {
+                console.warn("解析下载链接扩展名失败，使用首选扩展名:", err);
+                fileExt = preferredExtension;
+            }
+            link.download = `${song.name} - ${Array.isArray(song.artist) ? song.artist.join(", ") : song.artist}.${fileExt}`;
             link.target = "_blank";
             document.body.appendChild(link);
             link.click();
