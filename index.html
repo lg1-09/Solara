@@ -527,6 +527,21 @@
 <!-- 调试信息容器 -->
 <div id="debugInfo" class="debug-info"></div>
 
+<!-- 批量下载结果弹窗 -->
+<div id="bulkDownloadModal" class="bulk-download-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="bulkDownloadModalTitle">
+    <div class="bulk-download-modal__backdrop" aria-hidden="true"></div>
+    <div class="bulk-download-modal__dialog" role="document">
+        <div class="bulk-download-modal__title" id="bulkDownloadModalTitle">批量下载完成</div>
+        <div class="bulk-download-modal__body">
+            <div class="bulk-download-modal__summary" id="bulkDownloadModalSummary"></div>
+            <div class="bulk-download-modal__list" id="bulkDownloadModalFailed" hidden aria-hidden="true"></div>
+        </div>
+        <div class="bulk-download-modal__actions">
+            <button id="bulkDownloadModalOk" class="bulk-download-modal__ok" type="button">确定</button>
+        </div>
+    </div>
+</div>
+
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="js/index.js"></script>
 <script>
