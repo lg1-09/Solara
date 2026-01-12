@@ -3171,6 +3171,10 @@ function setupInteractions() {
         dom.exportPlaylistBtn.addEventListener("click", exportPlaylist);
     }
 
+    if (dom.downloadPlaylistBtn) {
+        dom.downloadPlaylistBtn.addEventListener("click", (e) => showBulkQualityMenu(e, 'playlist'));
+    }
+
     if (dom.mobileImportPlaylistBtn && dom.importPlaylistInput) {
         dom.mobileImportPlaylistBtn.addEventListener("click", () => {
             dom.importPlaylistInput.value = "";
@@ -3180,6 +3184,10 @@ function setupInteractions() {
 
     if (dom.mobileExportPlaylistBtn) {
         dom.mobileExportPlaylistBtn.addEventListener("click", exportPlaylist);
+    }
+
+    if (dom.mobileDownloadPlaylistBtn) {
+        dom.mobileDownloadPlaylistBtn.addEventListener("click", (e) => showBulkQualityMenu(e, 'playlist'));
     }
 
     if (dom.addAllFavoritesBtn) {
@@ -4163,12 +4171,25 @@ function showBulkQualityMenu(event, listType = 'favorites') {
 
     const menu = document.createElement("div");
     menu.className = "dynamic-quality-menu";
-    menu.innerHTML = `
-        <div class="quality-option" onclick="downloadListBulkWithQuality(event, '${listType}', '128')">标准音质 (128k)</div>
-        <div class="quality-option" onclick="downloadListBulkWithQuality(event, '${listType}', '192')">高音质 (192k)</div>
-        <div class="quality-option" onclick="downloadListBulkWithQuality(event, '${listType}', '320')">超高音质 (320k)</div>
-        <div class="quality-option" onclick="downloadListBulkWithQuality(event, '${listType}', '999')">无损音质</div>
-    `;
+
+    const options = [
+        { quality: '128', label: '标准音质 (128k)' },
+        { quality: '192', label: '高音质 (192k)' },
+        { quality: '320', label: '超高音质 (320k)' },
+        { quality: '999', label: '无损音质' },
+    ];
+
+    options.forEach(({ quality, label }) => {
+        const item = document.createElement('div');
+        item.className = 'quality-option';
+        item.textContent = label;
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            downloadListBulkWithQuality(e, listType, quality);
+        });
+        menu.appendChild(item);
+    });
 
     const button = event.target.closest("button") || event.target;
     const rect = button.getBoundingClientRect();
@@ -4194,14 +4215,17 @@ async function downloadFavoritesBulkWithQuality(event, quality) {
 }
 
 async function downloadListBulkWithQuality(event, listType, quality) {
-    event.stopPropagation();
+    if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation();
+    }
     const dynamicMenu = document.querySelector(".dynamic-quality-menu");
     if (dynamicMenu) dynamicMenu.remove();
     try {
         await downloadListBulk(listType, quality);
     } catch (err) {
         console.error("批量下载失败:", err);
-        showNotification("批量下载失败，请稍后重试", "error");
+        const msg = err && (err.message || err.toString) ? (err.message || String(err)) : '未知错误';
+        showNotification(`批量下载失败：${msg}`, "error");
     }
 }
 
@@ -4441,18 +4465,7 @@ async function ensureWritableDirectoryHandle() {
     return picked;
 }
 
-// 批量下载收藏列表（质量选定后的入口）
-async function downloadFavoritesBulkWithQuality(event, quality) {
-    event.stopPropagation();
-    const dynamicMenu = document.querySelector(".dynamic-quality-menu");
-    if (dynamicMenu) dynamicMenu.remove();
-    try {
-        await downloadFavoritesBulk(quality);
-    } catch (err) {
-        console.error("批量下载失败:", err);
-        showNotification("批量下载失败，请稍后重试", "error");
-    }
-}
+// NOTE: 收藏批量下载旧入口已在上方通过 downloadFavoritesBulkWithQuality -> downloadListBulkWithQuality 做兼容
 
 // 若尚未定义，提供扩展名标准化函数（用于将 mpeg -> mp3 等）
 if (typeof normalizeFileExtension !== 'function') {
@@ -4492,15 +4505,23 @@ function normalizeImageExtension(ext, preferred) {
     return preferred || 'jpg';
 }
 
-// 批量下载收藏列表实现：优先使用 File System Access API，否则回退到逐个下载
-async function downloadFavoritesBulk(quality = '320') {
-    const favorites = ensureFavoriteSongsArray();
-    if (!Array.isArray(favorites) || favorites.length === 0) {
-        showNotification("收藏列表为空，无法下载", "warning");
+// 批量下载列表实现：优先使用 File System Access API，否则回退到逐个下载
+async function downloadListBulk(listType = 'favorites', quality = '320') {
+    const songs = (() => {
+        if (listType === 'playlist') {
+            if (!Array.isArray(state.playlistSongs)) state.playlistSongs = [];
+            return state.playlistSongs;
+        }
+        if (!Array.isArray(state.favoriteSongs)) state.favoriteSongs = [];
+        return state.favoriteSongs;
+    })();
+
+    if (!Array.isArray(songs) || songs.length === 0) {
+        showNotification(listType === 'playlist' ? "播放列表为空，无法下载" : "收藏列表为空，无法下载", "warning");
         return;
     }
 
-    const total = favorites.length;
+    const total = songs.length;
     const failed = [];
     let successCount = 0;
     const perSongPercent = new Array(total).fill(0);
@@ -4533,17 +4554,18 @@ async function downloadFavoritesBulk(quality = '320') {
             dirHandle = await ensureWritableDirectoryHandle();
         } catch (err) {
             console.warn('目录选择或权限失败:', err);
-            showNotification('未选择目录或无写入权限', 'warning');
+            const msg = err && (err.message || err.toString) ? (err.message || String(err)) : '未知错误';
+            showNotification(`未选择目录或无写入权限：${msg}`, 'warning');
             return;
         }
 
         // 目录选择完成后再展示进度弹窗
-        openBulkDownloadProgressModal(favorites.map(songLabel));
+        openBulkDownloadProgressModal(songs.map(songLabel));
         setBulkDownloadOverallProgress({ percent: 0 });
 
         showNotification('开始下载到所选文件夹...');
-        for (let i = 0; i < favorites.length; i++) {
-            const song = favorites[i];
+        for (let i = 0; i < songs.length; i++) {
+            const song = songs[i];
             try {
                 const audioUrl = API.getSongUrl(song, quality);
                 const audioData = await API.fetchJson(audioUrl);
@@ -4653,11 +4675,11 @@ async function downloadFavoritesBulk(quality = '320') {
         showNotification('浏览器不支持选择保存路径，开始逐个下载...', 'info');
 
         // 无需选择目录，直接展示进度弹窗
-        openBulkDownloadProgressModal(favorites.map(songLabel));
+        openBulkDownloadProgressModal(songs.map(songLabel));
         setBulkDownloadOverallProgress({ percent: 0 });
 
-        for (let i = 0; i < favorites.length; i++) {
-            const song = favorites[i];
+        for (let i = 0; i < songs.length; i++) {
+            const song = songs[i];
             const baseName = `${sanitizeFileName(song.name)} - ${sanitizeFileName(Array.isArray(song.artist) ? song.artist.join(', ') : song.artist)}`;
             try {
                 // 音频：用 fetch 拿到 blob，再触发下载，便于统计成功/失败
@@ -4740,6 +4762,11 @@ async function downloadFavoritesBulk(quality = '320') {
 
         openBulkDownloadResultModal({ total, success: successCount, failed });
     }
+}
+
+// 保持兼容：旧函数名仍然可用
+async function downloadFavoritesBulk(quality = '320') {
+    return downloadListBulk('favorites', quality);
 }
 
 // 修复：播放搜索结果 - 添加到播放列表而不是清空
