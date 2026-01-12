@@ -4188,11 +4188,153 @@ function showBulkQualityMenu(event) {
 
 let runtimeBulkDownloadDirHandle = null;
 
+const bulkDownloadProgressState = {
+    active: false,
+    totalItems: 0,
+    // bytes-based progress when Content-Length available
+    totalBytesKnown: 0,
+    loadedBytes: 0,
+    // fallback progress by count
+    completedItems: 0,
+    items: [], // { label, loaded, total, percent, status }
+};
+
+function openBulkDownloadProgressModal(songs = []) {
+    const modal = document.getElementById('bulkDownloadModal');
+    const title = document.getElementById('bulkDownloadModalTitle');
+    const summary = document.getElementById('bulkDownloadModalSummary');
+    const failedBox = document.getElementById('bulkDownloadModalFailed');
+    const okBtn = document.getElementById('bulkDownloadModalOk');
+    const progressBox = document.getElementById('bulkDownloadModalProgress');
+    const overallText = document.getElementById('bulkDownloadOverallText');
+    const overallBar = document.getElementById('bulkDownloadOverallBar');
+    const itemsBox = document.getElementById('bulkDownloadItems');
+
+    if (!modal || !title || !summary || !failedBox || !okBtn || !progressBox || !overallText || !overallBar || !itemsBox) {
+        return;
+    }
+
+    title.textContent = '批量下载中';
+    summary.textContent = '';
+    failedBox.textContent = '';
+    failedBox.hidden = true;
+    failedBox.setAttribute('aria-hidden', 'true');
+
+    progressBox.hidden = false;
+    progressBox.setAttribute('aria-hidden', 'false');
+
+    overallText.textContent = '0%';
+    overallBar.style.width = '0%';
+
+    itemsBox.innerHTML = songs.map((label, idx) => {
+        const safeLabel = String(label || '');
+        return `
+            <div class="bulk-download-progress__item" data-bulk-progress-index="${idx}">
+                <div class="bulk-download-progress__itemTitle">
+                    <div class="bulk-download-progress__itemName">${escapeHtml(safeLabel)}</div>
+                    <div class="bulk-download-progress__itemPct" data-bulk-progress-pct>0%</div>
+                </div>
+                <div class="bulk-download-progress__bar">
+                    <div class="bulk-download-progress__barFill" data-bulk-progress-bar style="width: 0%"></div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    // 下载中不允许关闭（避免误触）；完成后会自动切换为“确定”可关闭
+    okBtn.disabled = true;
+    okBtn.setAttribute('aria-disabled', 'true');
+
+    modal.hidden = false;
+    modal.setAttribute('aria-hidden', 'false');
+}
+
+function setBulkDownloadProgressItem(index, { loaded = 0, total = 0, percent = null } = {}) {
+    const itemsBox = document.getElementById('bulkDownloadItems');
+    if (!itemsBox) return;
+    const row = itemsBox.querySelector(`[data-bulk-progress-index="${index}"]`);
+    if (!row) return;
+    const pctEl = row.querySelector('[data-bulk-progress-pct]');
+    const barEl = row.querySelector('[data-bulk-progress-bar]');
+
+    const pct = typeof percent === 'number'
+        ? Math.max(0, Math.min(100, percent))
+        : (total > 0 ? Math.max(0, Math.min(100, Math.floor((loaded / total) * 100))) : 0);
+
+    if (pctEl) pctEl.textContent = `${pct}%`;
+    if (barEl) barEl.style.width = `${pct}%`;
+}
+
+function setBulkDownloadOverallProgress({ percent = null } = {}) {
+    const overallText = document.getElementById('bulkDownloadOverallText');
+    const overallBar = document.getElementById('bulkDownloadOverallBar');
+    if (!overallText || !overallBar) return;
+
+    const pct = typeof percent === 'number'
+        ? Math.max(0, Math.min(100, percent))
+        : 0;
+    overallText.textContent = `${pct}%`;
+    overallBar.style.width = `${pct}%`;
+}
+
+function enableBulkDownloadModalOkToClose() {
+    const okBtn = document.getElementById('bulkDownloadModalOk');
+    if (!okBtn) return;
+    okBtn.disabled = false;
+    okBtn.setAttribute('aria-disabled', 'false');
+}
+
+async function fetchBlobWithProgress(url, onProgress) {
+    const resp = await fetch(url);
+    if (!resp.ok) {
+        const err = new Error(`HTTP_${resp.status}`);
+        err.status = resp.status;
+        throw err;
+    }
+
+    const contentLengthHeader = resp.headers.get('content-length');
+    const total = contentLengthHeader ? Number.parseInt(contentLengthHeader, 10) : 0;
+    const totalBytes = Number.isFinite(total) && total > 0 ? total : 0;
+
+    if (!resp.body || typeof resp.body.getReader !== 'function') {
+        const blob = await resp.blob();
+        if (typeof onProgress === 'function') {
+            onProgress({ loaded: blob.size || 0, total: blob.size || totalBytes || 0, done: true, totalKnown: Boolean(totalBytes || blob.size) });
+        }
+        return { blob, totalBytes: blob.size || totalBytes || 0 };
+    }
+
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+            chunks.push(value);
+            loaded += value.byteLength;
+            if (typeof onProgress === 'function') {
+                onProgress({ loaded, total: totalBytes, done: false, totalKnown: Boolean(totalBytes) });
+            }
+        }
+    }
+
+    if (typeof onProgress === 'function') {
+        onProgress({ loaded, total: totalBytes, done: true, totalKnown: Boolean(totalBytes) });
+    }
+
+    const blob = new Blob(chunks);
+    return { blob, totalBytes: totalBytes || blob.size || 0 };
+}
+
 function openBulkDownloadResultModal({ total = 0, success = 0, failed = [] } = {}) {
     const modal = document.getElementById('bulkDownloadModal');
     const summary = document.getElementById('bulkDownloadModalSummary');
     const failedBox = document.getElementById('bulkDownloadModalFailed');
     const okBtn = document.getElementById('bulkDownloadModalOk');
+    const title = document.getElementById('bulkDownloadModalTitle');
+    const progressBox = document.getElementById('bulkDownloadModalProgress');
 
     if (!modal || !summary || !failedBox || !okBtn) {
         // 回退：如果弹窗 DOM 不存在，继续用 toast
@@ -4200,6 +4342,15 @@ function openBulkDownloadResultModal({ total = 0, success = 0, failed = [] } = {
         showNotification(`批量下载完成：成功 ${success} / ${total}，失败 ${failedCount}`, failedCount ? 'warning' : 'success');
         return;
     }
+
+    if (title) {
+        title.textContent = '批量下载完成';
+    }
+    if (progressBox) {
+        progressBox.hidden = true;
+        progressBox.setAttribute('aria-hidden', 'true');
+    }
+    enableBulkDownloadModalOkToClose();
 
     const failedList = Array.isArray(failed) ? failed : [];
     const failedCount = failedList.length;
@@ -4303,6 +4454,15 @@ function sanitizeFileName(name) {
     return String(name).replace(/[\\/:*?"<>|\n\r\t]+/g, "_").trim();
 }
 
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 function normalizeImageExtension(ext, preferred) {
     if (!ext) return preferred || 'jpg';
     ext = String(ext).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -4324,6 +4484,7 @@ async function downloadFavoritesBulk(quality = '320') {
     const total = favorites.length;
     const failed = [];
     let successCount = 0;
+    const perSongPercent = new Array(total).fill(0);
     const songLabel = (song) => {
         const artistText = Array.isArray(song?.artist) ? song.artist.join(', ') : (song?.artist || '未知艺术家');
         return `${song?.name || '未知歌曲'} - ${artistText}`;
@@ -4339,6 +4500,16 @@ async function downloadFavoritesBulk(quality = '320') {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     };
+
+    const updateOverallFromPercents = () => {
+        const sum = perSongPercent.reduce((acc, v) => acc + (Number.isFinite(v) ? v : 0), 0);
+        const pct = total > 0 ? Math.floor(sum / total) : 0;
+        setBulkDownloadOverallProgress({ percent: pct });
+    };
+
+    // 打开“空白区域”进度展示
+    openBulkDownloadProgressModal(favorites.map(songLabel));
+    setBulkDownloadOverallProgress({ percent: 0 });
 
     // 浏览器支持目录选择并允许写入（Chromium 系列）
     if (typeof window.showDirectoryPicker === 'function') {
@@ -4363,13 +4534,14 @@ async function downloadFavoritesBulk(quality = '320') {
                 }
 
                 const downloadUrl = buildAudioProxyUrl(audioData.url) || preferHttpsUrl(audioData.url) || audioData.url;
-                const resp = await fetch(downloadUrl);
-                if (!resp.ok) {
-                    failed.push(songLabel(song));
-                    continue;
-                }
-
-                const blob = await resp.blob();
+                // 带进度下载音频
+                setBulkDownloadProgressItem(i, { percent: 0 });
+                const { blob } = await fetchBlobWithProgress(downloadUrl, ({ loaded, total: t, done, totalKnown }) => {
+                    const pct = totalKnown && t > 0 ? Math.floor((loaded / t) * 100) : (done ? 100 : perSongPercent[i]);
+                    perSongPercent[i] = Math.max(perSongPercent[i], pct);
+                    setBulkDownloadProgressItem(i, { percent: perSongPercent[i] });
+                    updateOverallFromPercents();
+                });
                 const preferredExtension = quality === '999' ? 'flac' : quality === '740' ? 'ape' : 'mp3';
                 let ext = preferredExtension;
                 const blobType = blob.type || '';
@@ -4397,6 +4569,9 @@ async function downloadFavoritesBulk(quality = '320') {
                 await writable.write(blob);
                 await writable.close();
                 successCount++;
+                perSongPercent[i] = 100;
+                setBulkDownloadProgressItem(i, { percent: 100 });
+                updateOverallFromPercents();
 
                 // 封面/歌词失败不计入歌曲失败
                 try {
@@ -4447,6 +4622,9 @@ async function downloadFavoritesBulk(quality = '320') {
             } catch (err) {
                 console.error('单首保存失败，继续下一个：', err);
                 failed.push(songLabel(song));
+                perSongPercent[i] = 100;
+                setBulkDownloadProgressItem(i, { percent: 100 });
+                updateOverallFromPercents();
             }
         }
 
@@ -4454,7 +4632,8 @@ async function downloadFavoritesBulk(quality = '320') {
     } else {
         // 浏览器不支持目录选择，使用逐个下载（通过创建 <a>）
         showNotification('浏览器不支持选择保存路径，开始逐个下载...', 'info');
-        for (const song of favorites) {
+        for (let i = 0; i < favorites.length; i++) {
+            const song = favorites[i];
             const baseName = `${sanitizeFileName(song.name)} - ${sanitizeFileName(Array.isArray(song.artist) ? song.artist.join(', ') : song.artist)}`;
             try {
                 // 音频：用 fetch 拿到 blob，再触发下载，便于统计成功/失败
@@ -4464,11 +4643,17 @@ async function downloadFavoritesBulk(quality = '320') {
                     failed.push(songLabel(song));
                 } else {
                     const downloadUrl = buildAudioProxyUrl(audioData.url) || preferHttpsUrl(audioData.url) || audioData.url;
-                    const resp = await fetch(downloadUrl);
-                    if (!resp.ok) {
+                    setBulkDownloadProgressItem(i, { percent: 0 });
+                    const { blob } = await fetchBlobWithProgress(downloadUrl, ({ loaded, total: t, done, totalKnown }) => {
+                        const pct = totalKnown && t > 0 ? Math.floor((loaded / t) * 100) : (done ? 100 : perSongPercent[i]);
+                        perSongPercent[i] = Math.max(perSongPercent[i], pct);
+                        setBulkDownloadProgressItem(i, { percent: perSongPercent[i] });
+                        updateOverallFromPercents();
+                    });
+
+                    if (!blob) {
                         failed.push(songLabel(song));
                     } else {
-                        const blob = await resp.blob();
                         const preferredExtension = quality === '999' ? 'flac' : quality === '740' ? 'ape' : 'mp3';
                         let ext = preferredExtension;
                         if (blob.type) {
@@ -4478,6 +4663,9 @@ async function downloadFavoritesBulk(quality = '320') {
                         const audioName = `${baseName}.${ext}`;
                         triggerBlobDownload(blob, audioName);
                         successCount++;
+                        perSongPercent[i] = 100;
+                        setBulkDownloadProgressItem(i, { percent: 100 });
+                        updateOverallFromPercents();
                     }
                 }
 
@@ -4518,6 +4706,9 @@ async function downloadFavoritesBulk(quality = '320') {
             } catch (err) {
                 console.warn('回退下载单首失败，继续下一个:', err);
                 failed.push(songLabel(song));
+                perSongPercent[i] = 100;
+                setBulkDownloadProgressItem(i, { percent: 100 });
+                updateOverallFromPercents();
             }
 
             await new Promise(r => setTimeout(r, 300));

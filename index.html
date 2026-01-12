@@ -533,6 +533,18 @@
     <div class="bulk-download-modal__dialog" role="document">
         <div class="bulk-download-modal__title" id="bulkDownloadModalTitle">批量下载完成</div>
         <div class="bulk-download-modal__body">
+            <div class="bulk-download-modal__progress" id="bulkDownloadModalProgress" hidden aria-hidden="true">
+                <div class="bulk-download-progress__overall">
+                    <div class="bulk-download-progress__row">
+                        <div class="bulk-download-progress__label">总进度</div>
+                        <div class="bulk-download-progress__text" id="bulkDownloadOverallText">0%</div>
+                    </div>
+                    <div class="bulk-download-progress__bar">
+                        <div class="bulk-download-progress__barFill" id="bulkDownloadOverallBar"></div>
+                    </div>
+                </div>
+                <div class="bulk-download-progress__items" id="bulkDownloadItems"></div>
+            </div>
             <div class="bulk-download-modal__summary" id="bulkDownloadModalSummary"></div>
             <div class="bulk-download-modal__list" id="bulkDownloadModalFailed" hidden aria-hidden="true"></div>
         </div>
