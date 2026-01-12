@@ -37,10 +37,12 @@ const dom = {
     importToFavorites: document.getElementById("importToFavorites"),
     importPlaylistBtn: document.getElementById("importPlaylistBtn"),
     exportPlaylistBtn: document.getElementById("exportPlaylistBtn"),
+    downloadPlaylistBtn: document.getElementById("downloadPlaylistBtn"),
     importPlaylistInput: document.getElementById("importPlaylistInput"),
     clearPlaylistBtn: document.getElementById("clearPlaylistBtn"),
     mobileImportPlaylistBtn: document.getElementById("mobileImportPlaylistBtn"),
     mobileExportPlaylistBtn: document.getElementById("mobileExportPlaylistBtn"),
+    mobileDownloadPlaylistBtn: document.getElementById("mobileDownloadPlaylistBtn"),
     playModeBtn: document.getElementById("playModeBtn"),
     playPauseBtn: document.getElementById("playPauseBtn"),
     progressBar: document.getElementById("progressBar"),
@@ -4153,7 +4155,7 @@ async function downloadWithQuality(event, index, type, quality) {
 }
 
 // 显示批量下载的质量选择菜单（收藏列表）
-function showBulkQualityMenu(event) {
+function showBulkQualityMenu(event, listType = 'favorites') {
     event.stopPropagation();
 
     const existingMenu = document.querySelector(".dynamic-quality-menu");
@@ -4162,10 +4164,10 @@ function showBulkQualityMenu(event) {
     const menu = document.createElement("div");
     menu.className = "dynamic-quality-menu";
     menu.innerHTML = `
-        <div class="quality-option" onclick="downloadFavoritesBulkWithQuality(event, '128')">标准音质 (128k)</div>
-        <div class="quality-option" onclick="downloadFavoritesBulkWithQuality(event, '192')">高音质 (192k)</div>
-        <div class="quality-option" onclick="downloadFavoritesBulkWithQuality(event, '320')">超高音质 (320k)</div>
-        <div class="quality-option" onclick="downloadFavoritesBulkWithQuality(event, '999')">无损音质</div>
+        <div class="quality-option" onclick="downloadListBulkWithQuality(event, '${listType}', '128')">标准音质 (128k)</div>
+        <div class="quality-option" onclick="downloadListBulkWithQuality(event, '${listType}', '192')">高音质 (192k)</div>
+        <div class="quality-option" onclick="downloadListBulkWithQuality(event, '${listType}', '320')">超高音质 (320k)</div>
+        <div class="quality-option" onclick="downloadListBulkWithQuality(event, '${listType}', '999')">无损音质</div>
     `;
 
     const button = event.target.closest("button") || event.target;
@@ -4184,6 +4186,23 @@ function showBulkQualityMenu(event) {
             }
         });
     }, 0);
+}
+
+// 保持兼容：旧的收藏批量下载入口
+async function downloadFavoritesBulkWithQuality(event, quality) {
+    return downloadListBulkWithQuality(event, 'favorites', quality);
+}
+
+async function downloadListBulkWithQuality(event, listType, quality) {
+    event.stopPropagation();
+    const dynamicMenu = document.querySelector(".dynamic-quality-menu");
+    if (dynamicMenu) dynamicMenu.remove();
+    try {
+        await downloadListBulk(listType, quality);
+    } catch (err) {
+        console.error("批量下载失败:", err);
+        showNotification("批量下载失败，请稍后重试", "error");
+    }
 }
 
 let runtimeBulkDownloadDirHandle = null;
@@ -4507,10 +4526,6 @@ async function downloadFavoritesBulk(quality = '320') {
         setBulkDownloadOverallProgress({ percent: pct });
     };
 
-    // 打开“空白区域”进度展示
-    openBulkDownloadProgressModal(favorites.map(songLabel));
-    setBulkDownloadOverallProgress({ percent: 0 });
-
     // 浏览器支持目录选择并允许写入（Chromium 系列）
     if (typeof window.showDirectoryPicker === 'function') {
         let dirHandle;
@@ -4521,6 +4536,10 @@ async function downloadFavoritesBulk(quality = '320') {
             showNotification('未选择目录或无写入权限', 'warning');
             return;
         }
+
+        // 目录选择完成后再展示进度弹窗
+        openBulkDownloadProgressModal(favorites.map(songLabel));
+        setBulkDownloadOverallProgress({ percent: 0 });
 
         showNotification('开始下载到所选文件夹...');
         for (let i = 0; i < favorites.length; i++) {
@@ -4632,6 +4651,11 @@ async function downloadFavoritesBulk(quality = '320') {
     } else {
         // 浏览器不支持目录选择，使用逐个下载（通过创建 <a>）
         showNotification('浏览器不支持选择保存路径，开始逐个下载...', 'info');
+
+        // 无需选择目录，直接展示进度弹窗
+        openBulkDownloadProgressModal(favorites.map(songLabel));
+        setBulkDownloadOverallProgress({ percent: 0 });
+
         for (let i = 0; i < favorites.length; i++) {
             const song = favorites[i];
             const baseName = `${sanitizeFileName(song.name)} - ${sanitizeFileName(Array.isArray(song.artist) ? song.artist.join(', ') : song.artist)}`;
@@ -5100,6 +5124,13 @@ function renderPlaylist() {
     updatePlaylistHighlight();
     updateMobileClearPlaylistVisibility();
     updatePlaylistActionStates();
+}
+
+function ensurePlaylistSongsArray() {
+    if (!Array.isArray(state.playlistSongs)) {
+        state.playlistSongs = [];
+    }
+    return state.playlistSongs;
 }
 
 function ensureFavoriteSongsArray() {
