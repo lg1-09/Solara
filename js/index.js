@@ -3171,10 +3171,6 @@ function setupInteractions() {
         dom.exportPlaylistBtn.addEventListener("click", exportPlaylist);
     }
 
-    if (dom.downloadPlaylistBtn) {
-        dom.downloadPlaylistBtn.addEventListener("click", (e) => showBulkQualityMenu(e, 'playlist'));
-    }
-
     if (dom.mobileImportPlaylistBtn && dom.importPlaylistInput) {
         dom.mobileImportPlaylistBtn.addEventListener("click", () => {
             dom.importPlaylistInput.value = "";
@@ -3184,10 +3180,6 @@ function setupInteractions() {
 
     if (dom.mobileExportPlaylistBtn) {
         dom.mobileExportPlaylistBtn.addEventListener("click", exportPlaylist);
-    }
-
-    if (dom.mobileDownloadPlaylistBtn) {
-        dom.mobileDownloadPlaylistBtn.addEventListener("click", (e) => showBulkQualityMenu(e, 'playlist'));
     }
 
     if (dom.addAllFavoritesBtn) {
@@ -4281,8 +4273,17 @@ async function handleBulkDownloadTrigger(event, listType = 'favorites') {
     if (event && typeof event.preventDefault === 'function') {
         event.preventDefault();
     }
+    if (event && typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+    }
     if (event && typeof event.stopPropagation === 'function') {
         event.stopPropagation();
+    }
+
+    // 如果之前残留了菜单，先清理，避免“进度弹窗 + 菜单同时出现”
+    const existingMenu = document.querySelector('.dynamic-quality-menu');
+    if (existingMenu) {
+        existingMenu.remove();
     }
 
     const savedQuality = getSavedBulkDownloadQuality();
