@@ -3207,7 +3207,19 @@ function setupInteractions() {
     }
 
     if (dom.downloadFavoritesBtn) {
-        dom.downloadFavoritesBtn.addEventListener("click", (e) => showBulkQualityMenu(e));
+        dom.downloadFavoritesBtn.addEventListener("click", (e) => handleBulkDownloadTrigger(e, 'favorites'));
+        dom.downloadFavoritesBtn.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            showBulkQualityMenu(e, 'favorites');
+        });
+    }
+
+    if (dom.downloadPlaylistBtn) {
+        dom.downloadPlaylistBtn.addEventListener("click", (e) => handleBulkDownloadTrigger(e, 'playlist'));
+        dom.downloadPlaylistBtn.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            showBulkQualityMenu(e, 'playlist');
+        });
     }
 
     if (dom.clearFavoritesBtn) {
@@ -3226,7 +3238,19 @@ function setupInteractions() {
     }
 
     if (dom.mobileDownloadFavoritesBtn) {
-        dom.mobileDownloadFavoritesBtn.addEventListener("click", (e) => showBulkQualityMenu(e));
+        dom.mobileDownloadFavoritesBtn.addEventListener("click", (e) => handleBulkDownloadTrigger(e, 'favorites'));
+        dom.mobileDownloadFavoritesBtn.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            showBulkQualityMenu(e, 'favorites');
+        });
+    }
+
+    if (dom.mobileDownloadPlaylistBtn) {
+        dom.mobileDownloadPlaylistBtn.addEventListener("click", (e) => handleBulkDownloadTrigger(e, 'playlist'));
+        dom.mobileDownloadPlaylistBtn.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            showBulkQualityMenu(e, 'playlist');
+        });
     }
 
     if (dom.mobileExportFavoritesBtn) {
@@ -4186,6 +4210,7 @@ function showBulkQualityMenu(event, listType = 'favorites') {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
+            setSavedBulkDownloadQuality(quality);
             downloadListBulkWithQuality(e, listType, quality);
         });
         menu.appendChild(item);
@@ -4209,6 +4234,74 @@ function showBulkQualityMenu(event, listType = 'favorites') {
     }, 0);
 }
 
+const BULK_DOWNLOAD_QUALITY_STORAGE_KEY = 'solara.bulkDownload.quality';
+
+function isValidBulkDownloadQuality(value) {
+    const q = String(value || '').trim();
+    // 128/192/320/999：菜单可选；740：历史上用于 ape（保留兼容）
+    return q === '128' || q === '192' || q === '320' || q === '999' || q === '740';
+}
+
+function getSavedBulkDownloadQuality() {
+    try {
+        const q = localStorage.getItem(BULK_DOWNLOAD_QUALITY_STORAGE_KEY);
+        return isValidBulkDownloadQuality(q) ? q : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function setSavedBulkDownloadQuality(quality) {
+    if (!isValidBulkDownloadQuality(quality)) {
+        return;
+    }
+    try {
+        localStorage.setItem(BULK_DOWNLOAD_QUALITY_STORAGE_KEY, String(quality));
+    } catch (_) {
+        // ignore
+    }
+}
+
+function getBulkQualityLabel(quality) {
+    const q = String(quality || '');
+    if (q === '128') return '标准音质 (128k)';
+    if (q === '192') return '高音质 (192k)';
+    if (q === '320') return '超高音质 (320k)';
+    if (q === '999') return '无损音质';
+    if (q === '740') return '无损音质 (APE)';
+    return q;
+}
+
+function shouldForceShowBulkQualityMenu(event) {
+    // Shift / Alt 强制重新选择音质
+    return Boolean(event && (event.shiftKey || event.altKey));
+}
+
+async function handleBulkDownloadTrigger(event, listType = 'favorites') {
+    if (event && typeof event.preventDefault === 'function') {
+        event.preventDefault();
+    }
+    if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation();
+    }
+
+    const savedQuality = getSavedBulkDownloadQuality();
+    if (!savedQuality || shouldForceShowBulkQualityMenu(event)) {
+        showBulkQualityMenu(event, listType);
+        return;
+    }
+
+    // 直接使用上次音质
+    try {
+        showNotification(`使用上次音质：${getBulkQualityLabel(savedQuality)}（按住 Shift 可重新选择）`, 'info');
+        await downloadListBulk(listType, savedQuality);
+    } catch (err) {
+        console.error('批量下载失败:', err);
+        const msg = err && (err.message || err.toString) ? (err.message || String(err)) : '未知错误';
+        showNotification(`批量下载失败：${msg}`, 'error');
+    }
+}
+
 // 保持兼容：旧的收藏批量下载入口
 async function downloadFavoritesBulkWithQuality(event, quality) {
     return downloadListBulkWithQuality(event, 'favorites', quality);
@@ -4221,6 +4314,7 @@ async function downloadListBulkWithQuality(event, listType, quality) {
     const dynamicMenu = document.querySelector(".dynamic-quality-menu");
     if (dynamicMenu) dynamicMenu.remove();
     try {
+        setSavedBulkDownloadQuality(quality);
         await downloadListBulk(listType, quality);
     } catch (err) {
         console.error("批量下载失败:", err);
