@@ -38,11 +38,13 @@ const dom = {
     importPlaylistBtn: document.getElementById("importPlaylistBtn"),
     exportPlaylistBtn: document.getElementById("exportPlaylistBtn"),
     downloadPlaylistBtn: document.getElementById("downloadPlaylistBtn"),
+    playlistDownloadExtrasSettingsBtn: document.getElementById("playlistDownloadExtrasSettingsBtn"),
     importPlaylistInput: document.getElementById("importPlaylistInput"),
     clearPlaylistBtn: document.getElementById("clearPlaylistBtn"),
     mobileImportPlaylistBtn: document.getElementById("mobileImportPlaylistBtn"),
     mobileExportPlaylistBtn: document.getElementById("mobileExportPlaylistBtn"),
     mobileDownloadPlaylistBtn: document.getElementById("mobileDownloadPlaylistBtn"),
+    mobilePlaylistDownloadExtrasSettingsBtn: document.getElementById("mobilePlaylistDownloadExtrasSettingsBtn"),
     playModeBtn: document.getElementById("playModeBtn"),
     playPauseBtn: document.getElementById("playPauseBtn"),
     progressBar: document.getElementById("progressBar"),
@@ -77,9 +79,11 @@ const dom = {
     importFavoritesBtn: document.getElementById("importFavoritesBtn"),
     exportFavoritesBtn: document.getElementById("exportFavoritesBtn"),
     downloadFavoritesBtn: document.getElementById("downloadFavoritesBtn"),
+    favoritesDownloadExtrasSettingsBtn: document.getElementById("favoritesDownloadExtrasSettingsBtn"),
     importFavoritesInput: document.getElementById("importFavoritesInput"),
     clearFavoritesBtn: document.getElementById("clearFavoritesBtn"),
     mobileDownloadFavoritesBtn: document.getElementById("mobileDownloadFavoritesBtn"),
+    mobileFavoritesDownloadExtrasSettingsBtn: document.getElementById("mobileFavoritesDownloadExtrasSettingsBtn"),
     currentFavoriteToggle: document.getElementById("currentFavoriteToggle"),
 };
 
@@ -3206,6 +3210,29 @@ function setupInteractions() {
         });
     }
 
+    const openExtrasSettings = async (e) => {
+        if (e && typeof e.preventDefault === 'function') e.preventDefault();
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        const saved = getSavedDownloadExtrasSettings();
+        await openDownloadExtrasSettingsModal(
+            { downloadCover: saved.downloadCover, downloadLyric: saved.downloadLyric },
+            { requireDecision: false }
+        );
+    };
+
+    if (dom.playlistDownloadExtrasSettingsBtn) {
+        dom.playlistDownloadExtrasSettingsBtn.addEventListener('click', openExtrasSettings);
+    }
+    if (dom.favoritesDownloadExtrasSettingsBtn) {
+        dom.favoritesDownloadExtrasSettingsBtn.addEventListener('click', openExtrasSettings);
+    }
+    if (dom.mobilePlaylistDownloadExtrasSettingsBtn) {
+        dom.mobilePlaylistDownloadExtrasSettingsBtn.addEventListener('click', openExtrasSettings);
+    }
+    if (dom.mobileFavoritesDownloadExtrasSettingsBtn) {
+        dom.mobileFavoritesDownloadExtrasSettingsBtn.addEventListener('click', openExtrasSettings);
+    }
+
     if (dom.downloadPlaylistBtn) {
         dom.downloadPlaylistBtn.addEventListener("click", (e) => handleBulkDownloadTrigger(e, 'playlist'));
         dom.downloadPlaylistBtn.addEventListener("contextmenu", (e) => {
@@ -4226,6 +4253,125 @@ function showBulkQualityMenu(event, listType = 'favorites') {
     }, 0);
 }
 
+const DOWNLOAD_EXTRAS_SETTINGS_STORAGE_KEY = 'solara.downloadExtrasSettings.v1';
+
+function getSavedDownloadExtrasSettings() {
+    try {
+        const raw = localStorage.getItem(DOWNLOAD_EXTRAS_SETTINGS_STORAGE_KEY);
+        if (!raw) {
+            return { isSet: false, downloadCover: false, downloadLyric: false };
+        }
+        const obj = JSON.parse(raw);
+        return {
+            isSet: true,
+            downloadCover: Boolean(obj && obj.downloadCover),
+            downloadLyric: Boolean(obj && obj.downloadLyric),
+        };
+    } catch (_) {
+        return { isSet: false, downloadCover: false, downloadLyric: false };
+    }
+}
+
+function saveDownloadExtrasSettings(settings) {
+    const payload = {
+        downloadCover: Boolean(settings && settings.downloadCover),
+        downloadLyric: Boolean(settings && settings.downloadLyric),
+        updatedAt: Date.now(),
+    };
+    try {
+        localStorage.setItem(DOWNLOAD_EXTRAS_SETTINGS_STORAGE_KEY, JSON.stringify(payload));
+    } catch (_) {
+        // ignore
+    }
+    return { isSet: true, downloadCover: payload.downloadCover, downloadLyric: payload.downloadLyric };
+}
+
+function openDownloadExtrasSettingsModal({ downloadCover = false, downloadLyric = false } = {}, { requireDecision = false } = {}) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('downloadExtrasSettingsModal');
+        const title = document.getElementById('downloadExtrasSettingsTitle');
+        const hint = document.getElementById('downloadExtrasSettingsHint');
+        const coverCb = document.getElementById('downloadExtrasCoverCheckbox');
+        const lyricCb = document.getElementById('downloadExtrasLyricCheckbox');
+        const okBtn = document.getElementById('downloadExtrasSettingsOkBtn');
+        const cancelBtn = document.getElementById('downloadExtrasSettingsCancelBtn');
+
+        if (!modal || !title || !hint || !coverCb || !lyricCb || !okBtn || !cancelBtn) {
+            resolve(null);
+            return;
+        }
+
+        title.textContent = requireDecision ? '下载设置（封面/歌词）' : '下载设置';
+        hint.textContent = requireDecision
+            ? '首次下载需要设置是否同时下载封面/歌词（默认不下载）。保存后下次会自动使用。'
+            : '默认不下载封面与歌词。保存后下次下载会自动使用。';
+
+        okBtn.textContent = requireDecision ? '保存并继续' : '保存';
+        cancelBtn.textContent = requireDecision ? '取消下载' : '取消';
+
+        coverCb.checked = Boolean(downloadCover);
+        lyricCb.checked = Boolean(downloadLyric);
+
+        const close = (result) => {
+            modal.hidden = true;
+            modal.setAttribute('aria-hidden', 'true');
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            document.removeEventListener('keydown', onKeydown);
+            modal.removeEventListener('click', onBackdropClick);
+            resolve(result);
+        };
+
+        const onOk = (e) => {
+            if (e && typeof e.preventDefault === 'function') e.preventDefault();
+            const next = saveDownloadExtrasSettings({
+                downloadCover: coverCb.checked,
+                downloadLyric: lyricCb.checked,
+            });
+            close(next);
+        };
+
+        const onCancel = (e) => {
+            if (e && typeof e.preventDefault === 'function') e.preventDefault();
+            close(null);
+        };
+
+        const onKeydown = (e) => {
+            if (e.key === 'Escape') {
+                close(null);
+            }
+        };
+
+        const onBackdropClick = (e) => {
+            // 点击遮罩关闭
+            const dialog = modal.querySelector('.bulk-download-modal__dialog');
+            if (dialog && !dialog.contains(e.target)) {
+                close(null);
+            }
+        };
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        document.addEventListener('keydown', onKeydown);
+        modal.addEventListener('click', onBackdropClick);
+
+        modal.hidden = false;
+        modal.setAttribute('aria-hidden', 'false');
+        okBtn.focus();
+    });
+}
+
+async function ensureDownloadExtrasSettings() {
+    const saved = getSavedDownloadExtrasSettings();
+    if (saved.isSet) {
+        return saved;
+    }
+    return await openDownloadExtrasSettingsModal(
+        { downloadCover: false, downloadLyric: false },
+        { requireDecision: true }
+    );
+}
+
 const BULK_DOWNLOAD_QUALITY_STORAGE_KEY = 'solara.bulkDownload.quality';
 
 function isValidBulkDownloadQuality(value) {
@@ -4616,6 +4762,12 @@ async function downloadListBulk(listType = 'favorites', quality = '320') {
         return;
     }
 
+    const extras = await ensureDownloadExtrasSettings();
+    if (!extras) {
+        showNotification('已取消下载', 'info');
+        return;
+    }
+
     const total = songs.length;
     const failed = [];
     let successCount = 0;
@@ -4709,9 +4861,9 @@ async function downloadListBulk(listType = 'favorites', quality = '320') {
                 setBulkDownloadProgressItem(i, { percent: 100 });
                 updateOverallFromPercents();
 
-                // 封面/歌词失败不计入歌曲失败
+                // 封面/歌词（可选）：失败不计入歌曲失败
                 try {
-                    if (song.pic_id) {
+                    if (extras.downloadCover && song.pic_id) {
                         const picJson = await API.fetchJson(API.getPicUrl(song));
                         if (picJson && picJson.url) {
                             const imgResp = await fetch(preferHttpsUrl(picJson.url));
@@ -4741,16 +4893,18 @@ async function downloadListBulk(listType = 'favorites', quality = '320') {
                 }
 
                 try {
-                    const lyricJson = await API.fetchJson(API.getLyric(song));
-                    const lyricText = lyricJson && (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric)
-                        ? (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric)
-                        : null;
-                    if (lyricText) {
-                        const lyricName = `${baseName}.lrc`;
-                        const lyricHandle = await dirHandle.getFileHandle(lyricName, { create: true });
-                        const lyricWritable = await lyricHandle.createWritable();
-                        await lyricWritable.write(lyricText);
-                        await lyricWritable.close();
+                    if (extras.downloadLyric) {
+                        const lyricJson = await API.fetchJson(API.getLyric(song));
+                        const lyricText = lyricJson && (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric)
+                            ? (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric)
+                            : null;
+                        if (lyricText) {
+                            const lyricName = `${baseName}.lrc`;
+                            const lyricHandle = await dirHandle.getFileHandle(lyricName, { create: true });
+                            const lyricWritable = await lyricHandle.createWritable();
+                            await lyricWritable.write(lyricText);
+                            await lyricWritable.close();
+                        }
                     }
                 } catch (err) {
                     console.warn('保存歌词失败:', err);
@@ -4810,9 +4964,9 @@ async function downloadListBulk(listType = 'favorites', quality = '320') {
                     }
                 }
 
-                // 封面
+                // 封面（可选）
                 try {
-                    if (song.pic_id) {
+                    if (extras.downloadCover && song.pic_id) {
                         const picJson = await API.fetchJson(API.getPicUrl(song));
                         if (picJson && picJson.url) {
                             const imgResp = await fetch(preferHttpsUrl(picJson.url));
@@ -4831,15 +4985,17 @@ async function downloadListBulk(listType = 'favorites', quality = '320') {
                     console.warn('回退下载封面失败:', err);
                 }
 
-                // 歌词
+                // 歌词（可选）
                 try {
-                    const lyricJson = await API.fetchJson(API.getLyric(song));
-                    const lyricText = lyricJson && (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric)
-                        ? (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric)
-                        : null;
-                    if (lyricText) {
-                        const blob = new Blob([lyricText], { type: 'text/plain' });
-                        triggerBlobDownload(blob, `${baseName}.lrc`);
+                    if (extras.downloadLyric) {
+                        const lyricJson = await API.fetchJson(API.getLyric(song));
+                        const lyricText = lyricJson && (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric)
+                            ? (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric)
+                            : null;
+                        if (lyricText) {
+                            const blob = new Blob([lyricText], { type: 'text/plain' });
+                            triggerBlobDownload(blob, `${baseName}.lrc`);
+                        }
                     }
                 } catch (err) {
                     console.warn('回退下载歌词失败:', err);
@@ -6624,6 +6780,12 @@ function normalizeFileExtension(ext, preferredExtension) {
 // 修复：下载歌曲
 async function downloadSong(song, quality = "320") {
     try {
+        const extras = await ensureDownloadExtrasSettings();
+        if (!extras) {
+            showNotification('已取消下载', 'info');
+            return;
+        }
+
         showNotification("正在准备下载...");
 
         const audioUrl = API.getSongUrl(song, quality);
@@ -6669,6 +6831,55 @@ async function downloadSong(song, quality = "320") {
             document.body.removeChild(link);
 
             showNotification("下载已开始", "success");
+
+            // 可选：同时下载封面/歌词（单曲下载不走目录写入，使用浏览器下载）
+            const triggerBlobDownload = (blob, filename) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            const baseName = `${sanitizeFileName(song.name)} - ${sanitizeFileName(Array.isArray(song.artist) ? song.artist.join(', ') : song.artist)}`;
+
+            if (extras.downloadCover && song.pic_id) {
+                try {
+                    const picJson = await API.fetchJson(API.getPicUrl(song));
+                    if (picJson && picJson.url) {
+                        const imgResp = await fetch(preferHttpsUrl(picJson.url));
+                        if (imgResp && imgResp.ok) {
+                            const imgBlob = await imgResp.blob();
+                            let imgExt = 'jpg';
+                            if (imgBlob.type) {
+                                const p = (imgBlob.type.split('/')[1] || '').split('+')[0];
+                                imgExt = normalizeImageExtension(p, 'jpg');
+                            }
+                            triggerBlobDownload(imgBlob, `${baseName} - cover.${imgExt}`);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('下载封面失败:', err);
+                }
+            }
+
+            if (extras.downloadLyric) {
+                try {
+                    const lyricJson = await API.fetchJson(API.getLyric(song));
+                    const lyricText = lyricJson && (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric)
+                        ? (lyricJson.lyric || lyricJson.lrc || lyricJson.tlyric || lyricJson.klyric)
+                        : null;
+                    if (lyricText) {
+                        const blob = new Blob([lyricText], { type: 'text/plain' });
+                        triggerBlobDownload(blob, `${baseName}.lrc`);
+                    }
+                } catch (err) {
+                    console.warn('下载歌词失败:', err);
+                }
+            }
         } else {
             throw new Error("无法获取下载地址");
         }

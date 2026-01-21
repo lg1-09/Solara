@@ -396,6 +396,15 @@
                                 <i class="fas fa-download" aria-hidden="true"></i>
                             </button>
                             <button
+                                class="playlist-action-btn"
+                                id="playlistDownloadExtrasSettingsBtn"
+                                type="button"
+                                title="下载设置（封面/歌词）"
+                                aria-label="下载设置（封面/歌词）"
+                            >
+                                <i class="fas fa-gear" aria-hidden="true"></i>
+                            </button>
+                            <button
                                 class="playlist-action-btn playlist-action-btn--clear clear-playlist-btn"
                                 id="clearPlaylistBtn"
                                 type="button"
@@ -450,6 +459,15 @@
                             >
                                 <i class="fas fa-download" aria-hidden="true"></i>
                             </button>
+                            <button
+                                class="playlist-action-btn"
+                                id="favoritesDownloadExtrasSettingsBtn"
+                                type="button"
+                                title="下载设置（封面/歌词）"
+                                aria-label="下载设置（封面/歌词）"
+                            >
+                                <i class="fas fa-gear" aria-hidden="true"></i>
+                            </button>
                             <input
                                 id="importFavoritesInput"
                                 class="playlist-import-input"
@@ -469,6 +487,15 @@
                             <button
                                 class="playlist-action-btn"
                                 id="exportFavoritesBtn"
+                                <button
+                                    id="mobilePlaylistDownloadExtrasSettingsBtn"
+                                    class="mobile-panel-action-btn"
+                                    type="button"
+                                    aria-label="下载设置（封面/歌词）"
+                                    title="下载设置（封面/歌词）"
+                                >
+                                    <i class="fas fa-gear" aria-hidden="true"></i>
+                                </button>
                                 type="button"
                                 title="导出收藏列表"
                                 aria-label="导出收藏列表"
@@ -493,6 +520,15 @@
                 <div class="lyrics empty" id="lyrics" data-placeholder="default">
                     <div class="lyrics-scroll" id="lyricsScroll">
                         <div class="lyrics-content" id="lyricsContent"></div>
+                            <button
+                                id="mobileFavoritesDownloadExtrasSettingsBtn"
+                                class="mobile-panel-action-btn"
+                                type="button"
+                                aria-label="下载设置（封面/歌词）"
+                                title="下载设置（封面/歌词）"
+                            >
+                                <i class="fas fa-gear" aria-hidden="true"></i>
+                            </button>
                     </div>
                 </div>
             </div>
@@ -568,6 +604,33 @@
         </div>
         <div class="bulk-download-modal__actions">
             <button id="bulkDownloadModalOk" class="bulk-download-modal__ok" type="button">确定</button>
+        </div>
+    </div>
+</div>
+
+<!-- 下载附加内容设置弹窗（封面/歌词） -->
+<div id="downloadExtrasSettingsModal" class="bulk-download-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="downloadExtrasSettingsTitle">
+    <div class="bulk-download-modal__backdrop" aria-hidden="true"></div>
+    <div class="bulk-download-modal__dialog" role="document">
+        <div class="bulk-download-modal__title" id="downloadExtrasSettingsTitle">下载设置</div>
+        <div class="bulk-download-modal__body">
+            <div class="download-extras-settings__hint" id="downloadExtrasSettingsHint">
+                默认不下载封面与歌词。
+            </div>
+            <div class="download-extras-settings__options" role="group" aria-label="下载附加内容">
+                <label class="download-extras-settings__option">
+                    <input id="downloadExtrasCoverCheckbox" type="checkbox" />
+                    <span>下载封面</span>
+                </label>
+                <label class="download-extras-settings__option">
+                    <input id="downloadExtrasLyricCheckbox" type="checkbox" />
+                    <span>下载歌词（.lrc）</span>
+                </label>
+            </div>
+        </div>
+        <div class="bulk-download-modal__actions">
+            <button id="downloadExtrasSettingsCancelBtn" class="bulk-download-modal__ok" type="button" style="background: transparent; color: var(--text-color); border: 1px solid var(--border-color); margin-right: 10px;">取消</button>
+            <button id="downloadExtrasSettingsOkBtn" class="bulk-download-modal__ok" type="button">保存</button>
         </div>
     </div>
 </div>
